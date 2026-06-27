@@ -13,35 +13,78 @@ import (
 // acceptHeader ははてなブログAtomPub APIが返すコンテンツを受け取るためのAcceptヘッダーです。
 const acceptHeader = "application/x.atom+xml, application/atom+xml, application/atomsvc+xml, application/xml, text/xml, */*"
 
-// cinnamonWait はページネーション時のリクエスト間隔です（はてなサーバーへの配慮）。
+// cinnamonWait はページネーション時のリクエスト間隔の既定値です（はてなサーバーへの配慮）。
 const cinnamonWait = 250 * time.Millisecond
+
+// defaultBaseURL ははてなブログAtomPub APIのベースURLです。
+const defaultBaseURL = "https://blog.hatena.ne.jp"
+
+// API ははてなブログ操作の抽象インターフェースです。コマンド層はこれに依存し、
+// テスト時はモックを注入できます。*Client が実装します。
+type API interface {
+	Verify() error
+	List(limit int) ([]*Entry, error)
+	Get(memberURL string) (*Entry, error)
+	Create(e *Entry) (*Entry, error)
+	Update(e *Entry) (*Entry, error)
+	Delete(memberURL string) error
+}
+
+// *Client が API を満たすことをコンパイル時に保証する。
+var _ API = (*Client)(nil)
 
 // Client ははてなブログAtomPub APIのクライアントです。
 type Client struct {
 	hatenaID string
 	blogID   string
 	apiKey   string
+	baseURL  string
 	http     *http.Client
+	pageWait time.Duration
+}
+
+// Option は Client の構成を変更する関数オプションです（主にテスト用の注入口）。
+type Option func(*Client)
+
+// WithBaseURL はベースURLを差し替えます（httptest等で使用）。
+func WithBaseURL(u string) Option {
+	return func(c *Client) { c.baseURL = strings.TrimRight(u, "/") }
+}
+
+// WithHTTPClient は使用する *http.Client を差し替えます。
+func WithHTTPClient(h *http.Client) Option {
+	return func(c *Client) { c.http = h }
+}
+
+// WithPageWait はページネーション時の待機時間を変更します（テストでは0にできます）。
+func WithPageWait(d time.Duration) Option {
+	return func(c *Client) { c.pageWait = d }
 }
 
 // NewClient は新しいクライアントを生成します。
-func NewClient(hatenaID, blogID, apiKey string) *Client {
-	return &Client{
+func NewClient(hatenaID, blogID, apiKey string, opts ...Option) *Client {
+	c := &Client{
 		hatenaID: hatenaID,
 		blogID:   blogID,
 		apiKey:   apiKey,
+		baseURL:  defaultBaseURL,
 		http:     &http.Client{Timeout: 30 * time.Second},
+		pageWait: cinnamonWait,
 	}
+	for _, o := range opts {
+		o(c)
+	}
+	return c
 }
 
 // collectionURI は記事コレクションのエンドポイントを返します。
 func (c *Client) collectionURI() string {
-	return fmt.Sprintf("https://blog.hatena.ne.jp/%s/%s/atom/entry", c.hatenaID, c.blogID)
+	return fmt.Sprintf("%s/%s/%s/atom/entry", c.baseURL, c.hatenaID, c.blogID)
 }
 
 // rootURI はサービス文書（ルート）のエンドポイントを返します。
 func (c *Client) rootURI() string {
-	return fmt.Sprintf("https://blog.hatena.ne.jp/%s/%s/atom", c.hatenaID, c.blogID)
+	return fmt.Sprintf("%s/%s/%s/atom", c.baseURL, c.hatenaID, c.blogID)
 }
 
 // do はWSSE認証ヘッダーを付与してHTTPリクエストを実行し、レスポンスボディを返します。
@@ -115,8 +158,8 @@ func (c *Client) List(limit int) ([]*Entry, error) {
 		}
 
 		url = feed.nextLink()
-		if url != "" {
-			time.Sleep(cinnamonWait)
+		if url != "" && c.pageWait > 0 {
+			time.Sleep(c.pageWait)
 		}
 	}
 

@@ -69,8 +69,16 @@ func Execute() error {
 	return err
 }
 
-// newClient は設定を読み込み、検証してからAPIクライアントを生成する共通ヘルパーです。
-func newClient() (*hatena.Client, *config.Config, error) {
+// buildClient は設定からAPIクライアント（インターフェース）を生成するファクトリです。
+// パッケージ変数にすることで、テスト時にモックへ差し替えられます。
+var buildClient = func(cfg *config.Config) hatena.API {
+	return hatena.NewClient(cfg.HatenaID, cfg.BlogID, cfg.APIKey)
+}
+
+// newClient は設定を読み込み・検証してからAPIクライアントを生成する共通ヘルパーです。
+// こちらもパッケージ変数（関数値）にしており、テストでクライアントと設定をまとめて
+// 差し替えられます。
+var newClient = func() (hatena.API, *config.Config, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, nil, err
@@ -78,5 +86,5 @@ func newClient() (*hatena.Client, *config.Config, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, nil, err
 	}
-	return hatena.NewClient(cfg.HatenaID, cfg.BlogID, cfg.APIKey), cfg, nil
+	return buildClient(cfg), cfg, nil
 }
