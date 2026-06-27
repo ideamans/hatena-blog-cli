@@ -16,10 +16,26 @@ var (
 	llmHelp      bool
 )
 
+// バージョン情報（main から SetVersion で設定される）
+var versionString = "dev"
+
+// SetVersion はビルド時のバージョン情報を設定します。
+func SetVersion(version, commit, date string) {
+	versionString = version
+	if commit != "" {
+		versionString += " (" + commit
+		if date != "" {
+			versionString += ", " + date
+		}
+		versionString += ")"
+	}
+}
+
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "hatena-blog",
-		Short: "はてなブログを操作するCLI",
+		Use:     "hatena-blog",
+		Version: versionString,
+		Short:   "はてなブログを操作するCLI",
 		Long: `はてなブログを操作するコマンドラインツールです。
 
 AtomPub APIを通じて記事の投稿・取得・更新・削除を行います。
