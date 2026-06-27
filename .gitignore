@@ -1,0 +1,5 @@
+/hatena-blog
+/dist/
+*.test
+*.out
+.DS_Store
