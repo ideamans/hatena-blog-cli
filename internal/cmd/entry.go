@@ -8,9 +8,36 @@ import (
 	"time"
 
 	"github.com/ideamans/hatena-blog-cli/internal/hatena"
+	"github.com/ideamans/hatena-blog-cli/internal/manuscript"
 	"github.com/ideamans/hatena-blog-cli/internal/output"
 	"github.com/spf13/cobra"
 )
+
+// --- frontmatterとフラグの優先解決ヘルパー（フラグ > frontmatter > 既定） ---
+
+func mergeString(cmd *cobra.Command, flag, flagVal, fmVal string) string {
+	if cmd.Flags().Changed(flag) {
+		return flagVal
+	}
+	return fmVal
+}
+
+func mergeStringSlice(cmd *cobra.Command, flag string, flagVal, fmVal []string) []string {
+	if cmd.Flags().Changed(flag) {
+		return flagVal
+	}
+	return fmVal
+}
+
+func mergeBool(cmd *cobra.Command, flag string, flagVal bool, fmVal *bool, def bool) bool {
+	if cmd.Flags().Changed(flag) {
+		return flagVal
+	}
+	if fmVal != nil {
+		return *fmVal
+	}
+	return def
+}
 
 func newEntryCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -24,6 +51,7 @@ func newEntryCmd() *cobra.Command {
 	cmd.AddCommand(newEntryCreateCmd())
 	cmd.AddCommand(newEntryUpdateCmd())
 	cmd.AddCommand(newEntryDeleteCmd())
+	cmd.AddCommand(newEntryPullCmd())
 	return cmd
 }
 
@@ -40,6 +68,22 @@ func contentTypeFromName(name string) (string, error) {
 		return hatena.ContentTypePlain, nil
 	default:
 		return "", fmt.Errorf("未対応のコンテンツタイプです: %s (markdown, hatena, html, plain が使用可能)", name)
+	}
+}
+
+// contentTypeToName はMIMEタイプを人間に優しい別名に変換します（原稿書き出し用）。
+func contentTypeToName(mime string) string {
+	switch mime {
+	case hatena.ContentTypeMarkdown:
+		return "markdown"
+	case hatena.ContentTypeHatena:
+		return "hatena"
+	case hatena.ContentTypeHTML:
+		return "html"
+	case hatena.ContentTypePlain:
+		return "plain"
+	default:
+		return mime
 	}
 }
 
@@ -139,36 +183,72 @@ func newEntryCreateCmd() *cobra.Command {
 本文は --content で直接指定するか、--file でファイルから読み込みます。
 --file - を指定すると標準入力から読み込みます。
 
+原稿ファイルが frontmatter（先頭の --- で囲んだYAML）で始まる場合、
+タイトル・カテゴリ・下書き等のメタデータをそこから読み取ります。
+コマンドラインのフラグは frontmatter より優先されます（フラグ > frontmatter > 既定）。
+
+frontmatterの例:
+  ---
+  title: 記事タイトル
+  draft: true
+  categories: [テスト, Markdown]
+  content_type: markdown
+  ---
+  本文（はてなMarkdownそのまま）
+
 例:
   hatena-blog entry create --title "テスト" --content "本文" --draft
-  hatena-blog entry create --title "記事" --file article.md --category 技術 --category Go
-  cat article.md | hatena-blog entry create --title "記事" --file -`,
+  hatena-blog entry create --file article.md          # メタデータはfrontmatterから
+  hatena-blog entry create --file article.md --draft  # 下書きフラグで上書き
+  cat article.md | hatena-blog entry create --file -`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			body, err := resolveContent(content, file)
+			raw, err := resolveContent(content, file)
 			if err != nil {
 				return err
 			}
-			if title == "" {
-				return fmt.Errorf("--title は必須です")
+			ms, err := manuscript.Parse([]byte(raw))
+			if err != nil {
+				return err
+			}
+			fm := ms.Front
+
+			// タイトル: フラグ > frontmatter
+			finalTitle := fm.Title
+			if cmd.Flags().Changed("title") {
+				finalTitle = title
+			}
+			if finalTitle == "" {
+				return fmt.Errorf("タイトルがありません（--title かfrontmatterの title を指定してください）")
 			}
 
-			ct, err := contentTypeFromName(contentType)
+			// コンテンツタイプ: フラグ > frontmatter > 既定(markdown)
+			ctName := fm.ContentType
+			if cmd.Flags().Changed("content-type") {
+				ctName = contentType
+			}
+			if ctName == "" {
+				ctName = "markdown"
+			}
+			ct, err := contentTypeFromName(ctName)
 			if err != nil {
 				return err
 			}
 
 			e := &hatena.Entry{
-				Title:       title,
-				Content:     body,
+				Title:       finalTitle,
+				Content:     ms.Body,
 				ContentType: ct,
-				Categories:  categories,
-				Draft:       draft,
-				Summary:     summary,
+				Categories:  mergeStringSlice(cmd, "category", categories, fm.Categories),
+				Draft:       mergeBool(cmd, "draft", draft, fm.Draft, false),
+				Summary:     mergeString(cmd, "summary", summary, fm.Summary),
 			}
-			if updated != "" {
-				t, err := time.Parse(time.RFC3339, updated)
+
+			// 更新日時: フラグ > frontmatter
+			updStr := mergeString(cmd, "updated", updated, fm.Updated)
+			if updStr != "" {
+				t, err := time.Parse(time.RFC3339, updStr)
 				if err != nil {
-					return fmt.Errorf("--updated はRFC3339形式で指定してください (例: 2026-06-27T10:00:00+09:00): %w", err)
+					return fmt.Errorf("updated はRFC3339形式で指定してください (例: 2026-06-27T10:00:00+09:00): %w", err)
 				}
 				e.Updated = t
 			}
@@ -201,34 +281,81 @@ func newEntryUpdateCmd() *cobra.Command {
 	var draft, published bool
 
 	cmd := &cobra.Command{
-		Use:   "update <編集URL>",
+		Use:   "update [編集URL]",
 		Short: "既存の記事を更新します",
 		Long: `編集URLを指定して既存の記事を更新します。
 
 指定しなかった項目は現在の値を引き継ぎます（部分更新）。
-下書き状態は --draft で下書きに、--published で公開に変更できます。`,
-		Args: cobra.ExactArgs(1),
+下書き状態は --draft で下書きに、--published で公開に変更できます。
+
+frontmatter付きの原稿を --file で渡す場合、編集URLは引数を省略して
+frontmatterの edit_url から解決できます（'entry pull' で書き出した原稿が使えます）。
+優先順位は フラグ > frontmatter > 現在の値 です。`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// 本文/原稿の読み込み（--content か --file 指定時のみ）
+			var ms *manuscript.Manuscript
+			if cmd.Flags().Changed("content") || cmd.Flags().Changed("file") {
+				raw, err := resolveContent(content, file)
+				if err != nil {
+					return err
+				}
+				ms, err = manuscript.Parse([]byte(raw))
+				if err != nil {
+					return err
+				}
+			}
+
+			// 編集URLの解決: 位置引数 > frontmatter
+			editURL := ""
+			if len(args) == 1 {
+				editURL = args[0]
+			} else if ms != nil {
+				editURL = ms.Front.EditURL
+			}
+			if editURL == "" {
+				return fmt.Errorf("編集URLが必要です（引数で指定するか、原稿のfrontmatterに edit_url を記載してください）")
+			}
+
 			client, _, err := newClient()
 			if err != nil {
 				return err
 			}
 
 			// 現在の記事を取得し、変更のあった項目だけ上書きする
-			e, err := client.Get(args[0])
+			e, err := client.Get(editURL)
 			if err != nil {
 				return fmt.Errorf("更新対象の記事の取得に失敗しました: %w", err)
 			}
 
+			// 原稿（frontmatter + 本文）からの上書き
+			if ms != nil {
+				e.Content = ms.Body
+				fm := ms.Front
+				if fm.Title != "" {
+					e.Title = fm.Title
+				}
+				if fm.Categories != nil {
+					e.Categories = fm.Categories
+				}
+				if fm.ContentType != "" {
+					ct, err := contentTypeFromName(fm.ContentType)
+					if err != nil {
+						return err
+					}
+					e.ContentType = ct
+				}
+				if fm.Summary != "" {
+					e.Summary = fm.Summary
+				}
+				if fm.Draft != nil {
+					e.Draft = *fm.Draft
+				}
+			}
+
+			// コマンドラインフラグでの上書き（frontmatterより優先）
 			if cmd.Flags().Changed("title") {
 				e.Title = title
-			}
-			if cmd.Flags().Changed("content") || cmd.Flags().Changed("file") {
-				body, err := resolveContent(content, file)
-				if err != nil {
-					return err
-				}
-				e.Content = body
 			}
 			if cmd.Flags().Changed("content-type") {
 				ct, err := contentTypeFromName(contentType)
@@ -249,10 +376,19 @@ func newEntryUpdateCmd() *cobra.Command {
 			if published {
 				e.Draft = false
 			}
-			if updated != "" {
-				t, err := time.Parse(time.RFC3339, updated)
+
+			// 更新日時: フラグ > frontmatter > サーバー委任（クリア）
+			updStr := ""
+			if ms != nil {
+				updStr = ms.Front.Updated
+			}
+			if cmd.Flags().Changed("updated") {
+				updStr = updated
+			}
+			if updStr != "" {
+				t, err := time.Parse(time.RFC3339, updStr)
 				if err != nil {
-					return fmt.Errorf("--updated はRFC3339形式で指定してください: %w", err)
+					return fmt.Errorf("updated はRFC3339形式で指定してください: %w", err)
 				}
 				e.Updated = t
 			} else {
@@ -315,6 +451,73 @@ func newEntryDeleteCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "確認なしで削除する")
+	return cmd
+}
+
+func newEntryPullCmd() *cobra.Command {
+	var outFile string
+	cmd := &cobra.Command{
+		Use:   "pull <編集URL>",
+		Short: "記事をfrontmatter付き原稿ファイルに書き出します",
+		Long: `編集URLの記事を取得し、frontmatter（メタデータ）+ 本文 の原稿形式で書き出します。
+
+書き出した原稿はローカルで編集し、'entry update --file <原稿>' で再投稿できます
+（編集URLはfrontmatterの edit_url から自動解決されます）。
+
+例:
+  hatena-blog entry pull "<編集URL>" -o article.md
+  hatena-blog entry pull "<編集URL>"          # 標準出力へ`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, _, err := newClient()
+			if err != nil {
+				return err
+			}
+			e, err := client.Get(args[0])
+			if err != nil {
+				return err
+			}
+
+			draft := e.Draft
+			fm := manuscript.FrontMatter{
+				Title:       e.Title,
+				Draft:       &draft,
+				Categories:  e.Categories,
+				ContentType: contentTypeToName(e.ContentType),
+				Summary:     e.Summary,
+				EditURL:     e.EditURL,
+				ID:          e.ID,
+				PageURL:     e.PageURL,
+			}
+			if !e.Updated.IsZero() {
+				fm.Updated = e.Updated.Format(time.RFC3339)
+			}
+			if !e.Published.IsZero() {
+				fm.Published = e.Published.Format(time.RFC3339)
+			}
+
+			doc, err := manuscript.Render(fm, e.Content)
+			if err != nil {
+				return err
+			}
+
+			if outFile == "" || outFile == "-" {
+				_, err := os.Stdout.Write(doc)
+				return err
+			}
+			if err := os.WriteFile(outFile, doc, 0o644); err != nil {
+				return fmt.Errorf("原稿ファイルの書き込みに失敗しました: %w", err)
+			}
+			result := map[string]interface{}{"status": "pulled", "file": outFile, "edit_url": e.EditURL}
+			return output.Print(outputFormat, result, []string{"項目", "値"}, [][]string{
+				{"状態", "書き出しました"},
+				{"ファイル", outFile},
+				{"タイトル", e.Title},
+				{"編集URL", e.EditURL},
+			})
+		},
+	}
+	cmd.Flags().StringVarP(&outFile, "output", "o", "", "出力先ファイル（省略時は標準出力）")
 	return cmd
 }
 
