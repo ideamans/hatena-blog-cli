@@ -1,0 +1,13 @@
+{
+  "name": "hatena-blog-cli",
+  "description": "Adds /hatena-blog-usage and /hatena-blog-install skills for publishing to Hatena Blog (はてなブログ) from the command line: create, fetch, update and delete entries via AtomPub, with Markdown, Hatena syntax or HTML bodies.",
+  "version": "0.2.0",
+  "author": {
+    "name": "Ideamans Inc.",
+    "email": "support@ideamans.com"
+  },
+  "homepage": "https://github.com/ideamans/hatena-blog-cli",
+  "repository": "https://github.com/ideamans/hatena-blog-cli",
+  "license": "MIT",
+  "keywords": ["hatena", "blog", "atompub", "publishing", "cli", "llm", "agent"]
+}

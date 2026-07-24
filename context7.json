@@ -1,0 +1,19 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "hatena-blog — Hatena Blog CLI",
+  "description": "A command-line tool for Hatena Blog (はてなブログ) over the AtomPub API: create, fetch, update, delete and list entries, manage categories, and round-trip articles as frontmatter manuscripts. Bodies are written as plain Markdown, Hatena syntax, HTML or text — the CLI generates and escapes the AtomPub XML. Built for scripts and AI agents, with the full reference embedded in the binary behind `hatena-blog llm`.",
+  "folders": ["internal/llmdocs"],
+  "excludeFolders": ["plugins", ".github"],
+  "rules": [
+    "Never write AtomPub XML and never pre-escape the body. Pass plain text via flags, --file or stdin; the CLI builds the XML and escapes & < > \" itself. Pre-escaping produces doubly-escaped entities in the published article.",
+    "An entry is addressed by its edit_url, taken from the JSON output of create/list/get. Never construct an edit_url by hand.",
+    "`entry update --category` REPLACES the whole category set. To add a category, fetch the current ones with `entry get` and pass the union.",
+    "Always pass --format json when parsing output; the default table format is for humans.",
+    "Long or symbol-heavy bodies go through --file or stdin (--file -), not --content, to avoid shell quoting mangling newlines and backticks.",
+    "--content-type selects the body format: markdown (default, text/x-markdown), hatena (text/x-hatena-syntax), html (text/html) or plain (text/plain). Markdown bodies may also contain Hatena embed syntax such as [https://…:embed:cite], [tex:…], [:contents] and (( )) footnotes.",
+    "Authentication uses HATENA_BLOG_HATENA_ID, HATENA_BLOG_ID and HATENA_BLOG_API_KEY (environment first, then ~/.config/hatena-blog). HTTP 401 Invalid login means the API key or Hatena ID is wrong; the key is issued on the blog's 詳細設定 page.",
+    "Publishing is immediately public. The safe flow is create --draft, verify, then update <edit_url> --published. `entry delete` requires --force in a non-interactive session and cannot be undone.",
+    "A file passed to --file may start with YAML frontmatter (title, draft, categories, content_type, summary, updated, edit_url). Command-line flags beat frontmatter, which beats defaults. `entry pull` writes such a manuscript for round-trip editing.",
+    "The complete reference is embedded in the binary: `hatena-blog llm` (Markdown) or `hatena-blog llm --format json`."
+  ]
+}

@@ -2,22 +2,24 @@
 package cmd
 
 import (
-	"errors"
-	"fmt"
+	"github.com/ideamans/go-llm-cli-kit/llmcmd"
+	"github.com/spf13/cobra"
 
 	"github.com/ideamans/hatena-blog-cli/internal/config"
 	"github.com/ideamans/hatena-blog-cli/internal/hatena"
-	"github.com/spf13/cobra"
 )
 
 // グローバルなフラグ
-var (
-	outputFormat string
-	llmHelp      bool
-)
+var outputFormat string
+
+// PluginVersion はこのCLIのリリースバージョンです。
+// plugins/hatena-blog-cli/.claude-plugin/plugin.json の version と一致していること
+// をテストが、git タグと一致していることをリリースワークフローが検査します。
+// タグを打つコミットで一緒に上げてください。
+const PluginVersion = "0.2.0"
 
 // バージョン情報（main から SetVersion で設定される）
-var versionString = "dev"
+var versionString = PluginVersion
 
 // SetVersion はビルド時のバージョン情報を設定します。
 func SetVersion(version, commit, date string) {
@@ -45,44 +47,32 @@ AtomPub APIを通じて記事の投稿・取得・更新・削除を行います
   2. 設定ファイル (~/.config/hatena-blog)
 
 初期設定は 'hatena-blog auth login' で対話的に行えます。
-LLMエージェント向けの詳細ガイドは 'hatena-blog --llm' で表示できます。`,
+AIエージェント向けの詳細リファレンスは 'hatena-blog llm' で表示できます。`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		// --llm は全コマンド共通で最優先に処理する。
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			if llmHelp {
-				fmt.Fprint(cmd.OutOrStdout(), llmGuide)
-				// ガイドを表示したら以降の処理は行わない。
-				return errLLMHelpShown
-			}
-			return nil
-		},
-		// 引数なし（サブコマンドなし）でも --llm を機能させるため RunE を持たせる。
+		// 引数なし（サブコマンドなし）でもヘルプを出す。
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
 
 	cmd.PersistentFlags().StringVar(&outputFormat, "format", "table", "出力フォーマット: table, json")
-	cmd.PersistentFlags().BoolVar(&llmHelp, "llm", false, "LLMエージェント向けの詳細な利用ガイドを表示する")
 
 	cmd.AddCommand(newAuthCmd())
 	cmd.AddCommand(newEntryCmd())
 	cmd.AddCommand(newCategoriesCmd())
+	llmcmd.AddTo(cmd, LLMConfig())
 
 	return cmd
 }
 
-// errLLMHelpShown は --llm ガイド表示後に通常処理を打ち切るためのセンチネルです。
-var errLLMHelpShown = errors.New("__llm_help_shown__")
+// Root は組み立て済みのコマンドツリーを実行せずに返します。
+// カタログ生成器が main と同じ定義から生成するために使います。
+func Root() *cobra.Command { return newRootCmd() }
 
 // Execute はルートコマンドを実行します。
 func Execute() error {
-	err := newRootCmd().Execute()
-	if errors.Is(err, errLLMHelpShown) {
-		return nil
-	}
-	return err
+	return newRootCmd().Execute()
 }
 
 // buildClient は設定からAPIクライアント（インターフェース）を生成するファクトリです。
