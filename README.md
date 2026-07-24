@@ -197,18 +197,35 @@ hatena-blog entry delete "<編集URL>" --force # 確認なし
 hatena-blog categories
 ```
 
-## LLMエージェント向けガイド
+## AIエージェントから使う
 
-LLMエージェントがこのCLI単体ではてなブログ投稿を完結できるよう、本文フォーマット
+AIエージェントがこのCLI単体ではてなブログ投稿を完結できるよう、本文フォーマット
 （Markdown / はてな記法 / HTML）・コマンド・推奨ワークフロー・内部XMLまでを網羅した
-詳細ガイドを内蔵しています。
+詳細リファレンスを内蔵しています。コマンドカタログは cobra の定義から生成される
+ため実装と乖離せず、バイナリに埋め込まれているのでオフラインでも動作します。
 
 ```bash
-hatena-blog --llm
+hatena-blog llm                  # Markdown
+hatena-blog llm --format json    # 章ごとのJSON配列
+hatena-blog --llm                # 非推奨エイリアス。従来どおりどのサブコマンドでも動作
 ```
 
-`--llm` はどのサブコマンドに付けても全文ガイドを表示して終了します
-（例: `hatena-blog entry create --llm`）。
+Claude Code ではプラグインを導入すると `/hatena-blog-usage` と
+`/hatena-blog-install` が使えます。
+
+```
+/plugin marketplace add ideamans/claude-public-plugins
+/plugin install hatena-blog-cli@ideamans-plugins
+```
+
+同じスキルは Copilot や Cursor など Agent Skills 対応ホストでも利用できます。
+
+```bash
+gh skill install ideamans/hatena-blog-cli/plugins/hatena-blog-cli/skills/hatena-blog-usage --agent copilot
+```
+
+スキル本体は [`plugins/hatena-blog-cli/`](plugins/hatena-blog-cli)、準拠している標準は
+[ideamans/go-llm-cli-kit](https://github.com/ideamans/go-llm-cli-kit) を参照してください。
 
 ## 出力フォーマット
 

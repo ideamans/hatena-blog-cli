@@ -29,5 +29,22 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      # 埋め込みリファレンスは go:embed の都合でコミットしている。
+      # ズレ防止はここで再生成して差分を検査すること。
+      - name: 埋め込みLLMリファレンスの再生成
+        run: go generate ./...
+
+      - name: コミット済みリファレンスが古ければ失敗
+        run: |
+          if ! git diff --exit-code -- internal/llmdocs; then
+            echo "::error::internal/llmdocs が古いです。'go generate ./...' を実行してコミットしてください。"
+            exit 1
+          fi
+
       - name: test
         run: go test -race -cover ./...
+
+      - name: llm サブコマンドの出力確認
+        run: |
+          go run ./cmd/hatena-blog llm | head -5
+          go run ./cmd/hatena-blog llm --format json | head -5
