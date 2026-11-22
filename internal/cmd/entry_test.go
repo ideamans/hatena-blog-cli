@@ -13,15 +13,17 @@ import (
 
 // mockAPI は hatena.API のテスト用実装です。呼び出しを記録します。
 type mockAPI struct {
-	verifyErr error
-	listFn    func(int) ([]*hatena.Entry, error)
-	getFn     func(string) (*hatena.Entry, error)
+	verifyErr      error
+	listFn         func(int) ([]*hatena.Entry, error)
+	listFilteredFn func(int, func(*hatena.Entry) bool) ([]*hatena.Entry, error)
+	getFn          func(string) (*hatena.Entry, error)
 
-	lastListLimit int
-	getURLs       []string
-	created       []*hatena.Entry
-	updated       []*hatena.Entry
-	deleted       []string
+	lastListLimit  int
+	lastListFilter func(*hatena.Entry) bool
+	getURLs        []string
+	created        []*hatena.Entry
+	updated        []*hatena.Entry
+	deleted        []string
 }
 
 func (m *mockAPI) Verify() error { return m.verifyErr }
@@ -30,6 +32,28 @@ func (m *mockAPI) List(limit int) ([]*hatena.Entry, error) {
 	m.lastListLimit = limit
 	if m.listFn != nil {
 		return m.listFn(limit)
+	}
+	return nil, nil
+}
+
+func (m *mockAPI) ListFiltered(limit int, filter func(*hatena.Entry) bool) ([]*hatena.Entry, error) {
+	m.lastListLimit = limit
+	m.lastListFilter = filter
+	if m.listFilteredFn != nil {
+		return m.listFilteredFn(limit, filter)
+	}
+	if m.listFn != nil {
+		entries, err := m.listFn(limit)
+		if err != nil || filter == nil {
+			return entries, err
+		}
+		out := make([]*hatena.Entry, 0, len(entries))
+		for _, e := range entries {
+			if filter(e) {
+				out = append(out, e)
+			}
+		}
+		return out, nil
 	}
 	return nil, nil
 }
@@ -240,6 +264,59 @@ func TestListLimitPassthrough(t *testing.T) {
 	}
 	if m.lastListLimit != 7 {
 		t.Errorf("limit should pass through as 7, got %d", m.lastListLimit)
+	}
+}
+
+func TestListNoFilterByDefault(t *testing.T) {
+	m := &mockAPI{}
+	if _, err := runCmd(t, m, "entry", "list"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.lastListFilter != nil {
+		t.Error("filter should be nil when neither --draft nor --published is given")
+	}
+}
+
+func TestListDraftFilterPassthrough(t *testing.T) {
+	m := &mockAPI{}
+	if _, err := runCmd(t, m, "entry", "list", "--draft"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.lastListFilter == nil {
+		t.Fatal("--draft should pass a non-nil filter")
+	}
+	if !m.lastListFilter(&hatena.Entry{Draft: true}) {
+		t.Error("--draft filter should accept drafts")
+	}
+	if m.lastListFilter(&hatena.Entry{Draft: false}) {
+		t.Error("--draft filter should reject published entries")
+	}
+}
+
+func TestListPublishedFilterPassthrough(t *testing.T) {
+	m := &mockAPI{}
+	if _, err := runCmd(t, m, "entry", "list", "--published"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.lastListFilter == nil {
+		t.Fatal("--published should pass a non-nil filter")
+	}
+	if m.lastListFilter(&hatena.Entry{Draft: true}) {
+		t.Error("--published filter should reject drafts")
+	}
+	if !m.lastListFilter(&hatena.Entry{Draft: false}) {
+		t.Error("--published filter should accept published entries")
+	}
+}
+
+func TestListDraftAndPublishedConflict(t *testing.T) {
+	m := &mockAPI{}
+	_, err := runCmd(t, m, "entry", "list", "--draft", "--published")
+	if err == nil {
+		t.Fatal("--draft and --published together should be an error")
+	}
+	if !strings.Contains(err.Error(), "--draft") {
+		t.Errorf("error should mention --draft: %v", err)
 	}
 }
 

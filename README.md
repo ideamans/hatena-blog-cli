@@ -68,6 +68,8 @@ hatena-blog auth logout            # 設定ファイルを削除
 ```bash
 hatena-blog entry list                # 最新20件
 hatena-blog entry list --limit 0      # 全件
+hatena-blog entry list --draft        # 下書きのみ
+hatena-blog entry list --published    # 公開済みのみ
 hatena-blog entry list --format json  # JSON出力
 ```
 

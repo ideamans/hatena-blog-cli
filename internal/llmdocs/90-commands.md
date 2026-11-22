@@ -130,11 +130,13 @@ hatena-blog entry get <編集URL>
 
 記事一覧を取得します
 
-記事の一覧を新しい順に取得します。--limit で取得件数を制限できます（0で全件）。
+記事の一覧を新しい順に取得します。--limit で取得件数を制限できます（0で全件）。--draft で下書きのみ、--published で公開済みのみに絞り込めます（併用はできません）。絞り込みは取得の走査中に適用されるため、--limit は絞り込み後の件数として数えます。
 
 | flag | type | default | description |
 | --- | --- | --- | --- |
+| `--draft` | bool | `false` | 下書きのみに絞り込む |
 | `--limit` | int | `20` | 取得件数の上限（0で全件） |
+| `--published` | bool | `false` | 公開済みのみに絞り込む |
 
 ### `hatena-blog entry pull`
 
