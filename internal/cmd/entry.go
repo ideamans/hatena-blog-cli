@@ -89,16 +89,28 @@ func contentTypeToName(mime string) string {
 
 func newEntryListCmd() *cobra.Command {
 	var limit int
+	var draftOnly, publishedOnly bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "記事一覧を取得します",
-		Long:  "記事の一覧を新しい順に取得します。--limit で取得件数を制限できます（0で全件）。",
+		Long:  "記事の一覧を新しい順に取得します。--limit で取得件数を制限できます（0で全件）。--draft で下書きのみ、--published で公開済みのみに絞り込めます（併用はできません）。絞り込みは取得の走査中に適用されるため、--limit は絞り込み後の件数として数えます。",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if draftOnly && publishedOnly {
+				return fmt.Errorf("--draft と --published は同時に指定できません")
+			}
+			var filter func(*hatena.Entry) bool
+			switch {
+			case draftOnly:
+				filter = func(e *hatena.Entry) bool { return e.Draft }
+			case publishedOnly:
+				filter = func(e *hatena.Entry) bool { return !e.Draft }
+			}
+
 			client, _, err := newClient()
 			if err != nil {
 				return err
 			}
-			entries, err := client.List(limit)
+			entries, err := client.ListFiltered(limit, filter)
 			if err != nil {
 				return err
 			}
@@ -118,6 +130,8 @@ func newEntryListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 20, "取得件数の上限（0で全件）")
+	cmd.Flags().BoolVar(&draftOnly, "draft", false, "下書きのみに絞り込む")
+	cmd.Flags().BoolVar(&publishedOnly, "published", false, "公開済みのみに絞り込む")
 	return cmd
 }
 

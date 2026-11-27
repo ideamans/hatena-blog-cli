@@ -24,6 +24,7 @@ const defaultBaseURL = "https://blog.hatena.ne.jp"
 type API interface {
 	Verify() error
 	List(limit int) ([]*Entry, error)
+	ListFiltered(limit int, filter func(*Entry) bool) ([]*Entry, error)
 	Get(memberURL string) (*Entry, error)
 	Create(e *Entry) (*Entry, error)
 	Update(e *Entry) (*Entry, error)
@@ -136,6 +137,14 @@ func (c *Client) Verify() error {
 // List は記事一覧を取得します。limit 件取得するまでページを辿ります。
 // limit が 0 以下の場合は全件取得します。
 func (c *Client) List(limit int) ([]*Entry, error) {
+	return c.ListFiltered(limit, nil)
+}
+
+// ListFiltered は List に絞り込みを加えたものです。filter が nil でない場合、
+// filter を満たす記事だけを対象にします。絞り込みはページ走査の途中で適用され、
+// limit は絞り込み後の件数として数えるため、条件に合う記事が後のページに
+// あっても limit 件に達するまで辿ります。
+func (c *Client) ListFiltered(limit int, filter func(*Entry) bool) ([]*Entry, error) {
 	var entries []*Entry
 	url := c.collectionURI()
 
@@ -151,7 +160,11 @@ func (c *Client) List(limit int) ([]*Entry, error) {
 		}
 
 		for _, xe := range feed.Entries {
-			entries = append(entries, xe.toEntry())
+			e := xe.toEntry()
+			if filter != nil && !filter(e) {
+				continue
+			}
+			entries = append(entries, e)
 			if limit > 0 && len(entries) >= limit {
 				return entries[:limit], nil
 			}
